@@ -4,7 +4,7 @@
  */
 (function () {
   var VOICEFLOW_CONFIG = {
-    projectID: "69e649b364eb056fea51d18f",
+    projectID: "69e69e7e64eb056fea557ec5",
     url: "https://general-runtime.voiceflow.com",
     versionID: "production",
     voice: {
