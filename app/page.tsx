@@ -101,7 +101,7 @@ export default function DashboardPage() {
           >
             Refresh now
           </button>
-          <a href="/index.html" style={{ fontSize: "0.9rem" }}>
+          <a href="/landing.html" style={{ fontSize: "0.9rem" }}>
             Landing page
           </a>
         </div>
