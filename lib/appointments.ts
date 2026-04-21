@@ -117,6 +117,107 @@ export function parseStatusInput(v: unknown): Status | null {
   return null;
 }
 
+export type AppointmentFieldUpdates = Partial<{
+  name: string;
+  phone: string;
+  service: string;
+  date: string;
+  time: string;
+  city: string;
+  status: Status;
+}>;
+
+function mergeAppointment(
+  existing: Appointment,
+  updates: AppointmentFieldUpdates
+): Appointment {
+  return {
+    ...existing,
+    ...(updates.name !== undefined ? { name: updates.name } : {}),
+    ...(updates.phone !== undefined ? { phone: updates.phone } : {}),
+    ...(updates.service !== undefined ? { service: updates.service } : {}),
+    ...(updates.date !== undefined ? { date: updates.date } : {}),
+    ...(updates.time !== undefined ? { time: updates.time } : {}),
+    ...(updates.city !== undefined ? { city: updates.city } : {}),
+    ...(updates.status !== undefined ? { status: updates.status } : {}),
+  };
+}
+
+export async function updateAppointmentFields(
+  id: string,
+  updates: AppointmentFieldUpdates
+): Promise<Appointment | null> {
+  const sql = getSql();
+  if (!sql) {
+    if (useEncryptedFile()) {
+      return withBookingsLock(async (list) => {
+        const i = list.findIndex((a) => a.id === id);
+        if (i === -1) return { list, result: null };
+        const next = [...list];
+        next[i] = mergeAppointment(next[i], updates);
+        return { list: next, result: next[i] };
+      });
+    }
+    const list = memoryStore();
+    const i = list.findIndex((a) => a.id === id);
+    if (i === -1) return null;
+    list[i] = mergeAppointment(list[i], updates);
+    return list[i];
+  }
+  await ensurePgSchema(sql);
+  const existingRows = (await sql`
+    select id, name, phone, service, date, time, city, status, created_at
+    from appointments
+    where id = ${id}
+  `) as PgAppointmentRow[];
+  const row = existingRows[0];
+  if (!row) return null;
+  const merged = mergeAppointment(rowToAppointment(row), updates);
+  const out = (await sql`
+    update appointments
+    set
+      name = ${merged.name},
+      phone = ${merged.phone},
+      service = ${merged.service},
+      date = ${merged.date},
+      time = ${merged.time},
+      city = ${merged.city},
+      status = ${merged.status}
+    where id = ${id}
+    returning id, name, phone, service, date, time, city, status, created_at
+  `) as PgAppointmentRow[];
+  return out[0] ? rowToAppointment(out[0]) : null;
+}
+
+export async function deleteAppointment(id: string): Promise<boolean> {
+  const sql = getSql();
+  if (!sql) {
+    if (useEncryptedFile()) {
+      const removed = await withBookingsLock(async (list) => {
+        const next = list.filter((a) => a.id !== id);
+        return {
+          list: next,
+          result: next.length < list.length,
+        };
+      });
+      return removed;
+    }
+    const list = memoryStore();
+    const len = list.length;
+    const idx = list.findIndex((a) => a.id === id);
+    if (idx === -1) return false;
+    list.splice(idx, 1);
+    return list.length < len;
+  }
+  await ensurePgSchema(sql);
+  const rows = (await sql`
+    delete from appointments
+    where id = ${id}
+    returning id
+  `) as { id: string }[];
+  return rows.length > 0;
+}
+
 export async function listAppointments(): Promise<Appointment[]> {
   const sql = getSql();
   if (!sql) {
@@ -188,30 +289,5 @@ export async function updateAppointmentStatus(
   id: string,
   status: Status
 ): Promise<Appointment | null> {
-  const sql = getSql();
-  if (!sql) {
-    if (useEncryptedFile()) {
-      return withBookingsLock(async (list) => {
-        const i = list.findIndex((a) => a.id === id);
-        if (i === -1) return { list, result: null };
-        const next = [...list];
-        next[i] = { ...next[i], status };
-        return { list: next, result: next[i] };
-      });
-    }
-    const list = memoryStore();
-    const i = list.findIndex((a) => a.id === id);
-    if (i === -1) return null;
-    list[i] = { ...list[i], status };
-    return list[i];
-  }
-  await ensurePgSchema(sql);
-  const rows = (await sql`
-    update appointments
-    set status = ${status}
-    where id = ${id}
-    returning id, name, phone, service, date, time, city, status, created_at
-  `) as PgAppointmentRow[];
-  if (!rows.length) return null;
-  return rowToAppointment(rows[0]);
+  return updateAppointmentFields(id, { status });
 }
