@@ -1,9 +1,22 @@
+import { NextResponse } from "next/server";
 import postgres from "postgres";
-import {
-  fileStoreRead,
-  readEncryptedBookings,
-  withBookingsLock,
-} from "./encrypted-file-store";
+
+export const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export function withCors<T extends NextResponse | Response>(res: T): T {
+  Object.entries(CORS_HEADERS).forEach(([k, v]) => {
+    res.headers.set(k, v);
+  });
+  return res;
+}
+
+export function corsOptions(): NextResponse {
+  return withCors(new NextResponse(null, { status: 204 }));
+}
 
 export type Status = "pending" | "confirmed" | "cancelled";
 
@@ -45,16 +58,6 @@ function getSql() {
     g.__appointmentsSql = postgres(url, { prepare: false });
   }
   return g.__appointmentsSql;
-}
-
-/**
- * Encrypted JSON file at `data/bookings.enc` (local / single server only).
- * Disabled on Vercel — serverless has no durable writable disk.
- */
-function useEncryptedFile(): boolean {
-  if (process.env.VERCEL === "1") return false;
-  const key = process.env.BOOKINGS_ENCRYPTION_KEY?.trim();
-  return Boolean(key && key.length >= 8);
 }
 
 let schemaEnsured = false;
@@ -109,7 +112,6 @@ function normalizeStatus(s: string): Status {
   return "pending";
 }
 
-/** Accept only explicit valid status values (for PATCH body). */
 export function parseStatusInput(v: unknown): Status | null {
   if (typeof v !== "string") return null;
   const x = v.toLowerCase().trim();
@@ -149,15 +151,6 @@ export async function updateAppointmentFields(
 ): Promise<Appointment | null> {
   const sql = getSql();
   if (!sql) {
-    if (useEncryptedFile()) {
-      return withBookingsLock(async (list) => {
-        const i = list.findIndex((a) => a.id === id);
-        if (i === -1) return { list, result: null };
-        const next = [...list];
-        next[i] = mergeAppointment(next[i], updates);
-        return { list: next, result: next[i] };
-      });
-    }
     const list = memoryStore();
     const i = list.findIndex((a) => a.id === id);
     if (i === -1) return null;
@@ -192,22 +185,11 @@ export async function updateAppointmentFields(
 export async function deleteAppointment(id: string): Promise<boolean> {
   const sql = getSql();
   if (!sql) {
-    if (useEncryptedFile()) {
-      const removed = await withBookingsLock(async (list) => {
-        const next = list.filter((a) => a.id !== id);
-        return {
-          list: next,
-          result: next.length < list.length,
-        };
-      });
-      return removed;
-    }
     const list = memoryStore();
-    const len = list.length;
     const idx = list.findIndex((a) => a.id === id);
     if (idx === -1) return false;
     list.splice(idx, 1);
-    return list.length < len;
+    return true;
   }
   await ensurePgSchema(sql);
   const rows = (await sql`
@@ -221,13 +203,6 @@ export async function deleteAppointment(id: string): Promise<boolean> {
 export async function listAppointments(): Promise<Appointment[]> {
   const sql = getSql();
   if (!sql) {
-    if (useEncryptedFile()) {
-      const list = await fileStoreRead(() => readEncryptedBookings());
-      return [...list].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-    }
     return [...memoryStore()].sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
@@ -246,17 +221,6 @@ export async function addAppointment(
 ): Promise<Appointment> {
   const sql = getSql();
   if (!sql) {
-    if (useEncryptedFile()) {
-      return withBookingsLock(async (list) => {
-        const appt: Appointment = {
-          id: crypto.randomUUID(),
-          ...input,
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        };
-        return { list: [appt, ...list], result: appt };
-      });
-    }
     const appt: Appointment = {
       id: crypto.randomUUID(),
       ...input,
@@ -283,11 +247,4 @@ export async function addAppointment(
   const row = rows[0];
   if (!row) throw new Error("Insert failed");
   return rowToAppointment(row);
-}
-
-export async function updateAppointmentStatus(
-  id: string,
-  status: Status
-): Promise<Appointment | null> {
-  return updateAppointmentFields(id, { status });
 }

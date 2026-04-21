@@ -1,15 +1,13 @@
 /**
- * Voiceflow web chat widget — load once per page.
- * Edit VOICEFLOW_CONFIG below; keep this file if you reuse embed on other pages.
+ * REUSE: copy this file to any static site. Only edit VOICEFLOW_CONFIG below.
+ * Landing HTML stays untouched — it only needs: <script src="/voiceflow-embed.js" defer></script>
  */
 (function () {
   var VOICEFLOW_CONFIG = {
     projectID: "69e69e7e64eb056fea557ec5",
     url: "https://general-runtime.voiceflow.com",
     versionID: "production",
-    voice: {
-      url: "https://runtime-api.voiceflow.com",
-    },
+    voice: { url: "https://runtime-api.voiceflow.com" },
   };
 
   var BUNDLE = "https://cdn.voiceflow.com/widget-next/bundle.mjs";
